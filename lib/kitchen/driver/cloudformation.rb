@@ -93,15 +93,14 @@ module Kitchen
           sleep(30)
           s = cf.get_stack(state[:stack_name])
         end
+        display_stack_events(state[:stack_name])
         if s.stack_status == complete_status
-          display_stack_events(state[:stack_name])
-          outputs = Hash[*(s.outputs.map { |o|
+          outputs = Hash[*s.outputs.map do |o|
             [o[:output_key], o[:output_value]]
-          }.flatten)]
-          state[:hostname] = config[:hostname].gsub(/\${([^}]+)}/) { |s| outputs[$1]||"" } if config[:hostname]
+          end.flatten]
+          state[:hostname] = config[:hostname].gsub(/\${([^}]+)}/) { outputs[Regexp.last_match(1)] || '' } if config[:hostname]
           info("CloudFormation stack <#{state[:stack_name]}> created.")
         else
-          display_stack_events(state[:stack_name])
           error("CloudFormation stack <#{state.stack_name}> failed to create....attempting to delete")
           destroy(state) if destroy_on_fail
         end
