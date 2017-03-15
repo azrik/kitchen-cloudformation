@@ -74,6 +74,11 @@ module Kitchen
           resource.create_stack(options)
         end
 
+        def update_stack(stack_name, options)
+          s = resource.stack(stack_name)
+          s.update(options)
+        end
+
         def get_stack(stack_name)
           resource.stack(stack_name)
         end

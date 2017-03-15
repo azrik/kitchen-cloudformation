@@ -56,40 +56,54 @@ module Kitchen
 
       def create(state)
         copy_deprecated_configs(state)
-        return if state[:stack_name]
+        #return if state[:stack_name]
 
-        info(Kitchen::Util.outdent!(<<-END))
-          Creating CloudFormation Stack <#{config[:stack_name]}>...
-          If you are not using an account that qualifies under the AWS
-          free-tier, you may be charged to run these suites. The charge
-          should be minimal, but neither Test Kitchen nor its maintainers
-          are responsible for your incurred costs.
-        END
         begin
-          stack = create_stack
+          if state[:stack_name]
+            update_stack(state[:stack_name])
+            progress_status = ['UPDATE_IN_PROGRESS','UPDATE_COMPLETE_CLEANUP_IN_PROGRESS']
+            complete_status = 'UPDATE_COMPLETE'
+            destroy_on_fail = false
+            info("Stack <#{state[:stack_name]}> updated requested.")
+          else
+            info(Kitchen::Util.outdent!(<<-END))
+              Creating CloudFormation Stack <#{config[:stack_name]}>...
+              If you are not using an account that qualifies under the AWS
+              free-tier, you may be charged to run these suites. The charge
+              should be minimal, but neither Test Kitchen nor its maintainers
+              are responsible for your incurred costs.
+            END
+            stack = create_stack
+            state[:stack_name] = stack.stack_name
+            progress_status = ['CREATE_IN_PROGRESS']
+            complete_status = 'CREATE_COMPLETE'
+            destroy_on_fail = true
+            info("Stack <#{state[:stack_name]}> requested.")
+          end
         rescue # Exception => e
           error("CloudFormation #{$ERROR_INFO}.") # e.message
           return
         end
-        state[:stack_name] = stack.stack_name
-        state[:hostname] = config[:hostname]
-        info("Stack <#{state[:stack_name]}> requested.")
         # tag_stack(stack)
 
         s = cf.get_stack(state[:stack_name])
-        while s.stack_status == 'CREATE_IN_PROGRESS'
+        while progress_status.include? s.stack_status
           debug_stack_events(state[:stack_name])
-          info("CloudFormation waiting for stack <#{state[:stack_name]}> to be created.....")
+          info("CloudFormation waiting for stack <#{state[:stack_name]}> to complete.....")
           sleep(30)
           s = cf.get_stack(state[:stack_name])
         end
-        if s.stack_status == 'CREATE_COMPLETE'
+        if s.stack_status == complete_status
           display_stack_events(state[:stack_name])
+          outputs = Hash[*(s.outputs.map { |o|
+            [o[:output_key], o[:output_value]]
+          }.flatten)]
+          state[:hostname] = config[:hostname].gsub(/\${([^}]+)}/) { |s| outputs[$1]||"" } if config[:hostname]
           info("CloudFormation stack <#{state[:stack_name]}> created.")
         else
           display_stack_events(state[:stack_name])
-          error("CloudFormation stack <#{stack.stack_name}> failed to create....attempting to delete")
-          destroy(state)
+          error("CloudFormation stack <#{state.stack_name}> failed to create....attempting to delete")
+          destroy(state) if destroy_on_fail
         end
       end
 
@@ -152,6 +166,12 @@ module Kitchen
         stack_data = stack_generator.cf_stack_data
         info("Creating CloudFormation Stack #{stack_data[:stack_name]}")
         cf.create_stack(stack_data)
+      end
+
+      def update_stack(stack_name)
+        stack_data = stack_generator.cf_stack_data
+        info("Updating CloudFormation Stack #{stack_data[:stack_name]}")
+        cf.update_stack(stack_name,stack_data)
       end
 
       def debug_stack_events(stack_name)
